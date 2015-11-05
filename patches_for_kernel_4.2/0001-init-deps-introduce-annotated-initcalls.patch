@@ -1,0 +1,533 @@
+From b0263b3899bce219b0ec32b515af30919096890b Mon Sep 17 00:00:00 2001
+From: Alexander Holler <holler@ahsoftware.de>
+Date: Sat, 17 Oct 2015 19:14:14 +0200
+Subject: [PATCH 01/14] init: deps: introduce annotated initcalls
+
+Make it possible to identify initcalls before calling them by adding an
+ID, an optional pointer to a list of IDs the initcalls depends on and
+an optional pointer to a struct device_driver.
+
+This is e.g. necessary in order to sort initcalls by whatever means
+before calling them.
+
+To annotate an initcall, the following changes are necessary on
+drivers which want to offer that feature:
+
+now		annotated
+------------------------------------------------------------------------
+pure_initcall(fn)
+		annotated_initcall(pure, fn, id, dependencies) or
+		annotated_initcall_drv(pure, fn, id, dependencies, drv)
+core_initcall(fn)
+		annotated_initcall(core, fn, id, dependencies) or
+		annotated_initcall_drv(core, fn, id, dependencies, drv)
+core_initcall_sync(fn)
+		annotated_initcall_sync(core, fn, id, dependencies) or
+		annotated_initcall_sync_drv(core, fn, id, dependencies,
+								drv)
+(...)
+late_initcall(fn)
+		annotated_initcall(late, fn, id, dependencies)
+module_init(fn)
+		annotated_module_init(fn, id, dependencies)
+
+module_platform_driver(drv)
+		annotated_module_platform_driver(drv, id, dependencies)
+module_platform_driver_probe(drv, probe)
+		annotated:module_platform_driver_probe(drv, probe, id,
+							 dependencies)
+module_i2c_driver(i2c_drv)
+		annotated_module_i2c_driver(i2c_drv, id, dependencies)
+module_usb_driver(usb_drv)
+		annotated_module_usb_driver(usb_drv, id, dependencies)
+module_phy_driver(__phy_drivers)
+		annotated_module_phy_driver(__phy_drivers, id,
+						dependencies)
+module_pci_driver(pci_driver)
+		annotated_module_pci_driver(pci_driver, id,
+						dependencies)
+module_serio_driver(serio_driver)
+		annotated_module_serio_driver(serio_driver, id,
+						dependencies)
+module_acpi_driver(acpi_driver)
+		annotated_module_acpi_driver(acpi_driver, id,
+						dependencies)
+
+E.g. to make the driver sram offering an annotated initcall the
+following patch is necessary:
+
+----
+-postcore_initcall(sram_init);
++annotated_initcall_drv(postcore, sram_init, drvid_sram, NULL,
++			sram_driver.driver);
+----
+
+The change for a module with dependencies might look like:
+
+----
+-module_platform_driver(gpio_led_driver);
++static const unsigned dependencies[] __initdata __maybe_unused = {
++	drvid_leds,
++	0
++};
++
++annotated_module_platform_driver(gpio_led_driver, drvid_gpio_led,
++					dependencies);
+----
+
+These changes can be done without any fear. If the feature is disabled,
+which is the default, the new macros will just map to the old ones and
+nothing is changed at all.
+
+Signed-off-by: Alexander Holler <holler@ahsoftware.de>
+---
+ arch/arm/kernel/vmlinux.lds.S     |  1 +
+ arch/arm/mach-omap2/soc.h         | 10 ++++++-
+ drivers/usb/storage/usb.h         | 14 ++++++++++
+ include/acpi/acpi_bus.h           | 13 +++++++++
+ include/asm-generic/vmlinux.lds.h |  7 +++++
+ include/linux/device.h            | 14 ++++++++++
+ include/linux/driver_ids.h        | 21 ++++++++++++++
+ include/linux/i2c.h               |  4 +++
+ include/linux/init.h              | 58 +++++++++++++++++++++++++++++++++++++++
+ include/linux/module.h            |  7 +++++
+ include/linux/pci.h               |  4 +++
+ include/linux/phy.h               | 16 +++++++++++
+ include/linux/platform_device.h   | 41 +++++++++++++++++++++++++--
+ include/linux/serio.h             |  5 ++++
+ include/linux/usb.h               | 12 ++++++++
+ init/Kconfig                      |  3 ++
+ 16 files changed, 226 insertions(+), 4 deletions(-)
+ create mode 100644 include/linux/driver_ids.h
+
+diff --git a/arch/arm/kernel/vmlinux.lds.S b/arch/arm/kernel/vmlinux.lds.S
+index 8b60fde..c22784e 100644
+--- a/arch/arm/kernel/vmlinux.lds.S
++++ b/arch/arm/kernel/vmlinux.lds.S
+@@ -213,6 +213,7 @@ SECTIONS
+ #endif
+ 		INIT_SETUP(16)
+ 		INIT_CALLS
++		ANNOTATED_INITCALLS
+ 		CON_INITCALL
+ 		SECURITY_INITCALL
+ 		INIT_RAM_FS
+diff --git a/arch/arm/mach-omap2/soc.h b/arch/arm/mach-omap2/soc.h
+index f97654d..75f7012 100644
+--- a/arch/arm/mach-omap2/soc.h
++++ b/arch/arm/mach-omap2/soc.h
+@@ -554,5 +554,13 @@ level(__##fn);
+ #define omap_late_initcall(fn)		omap_initcall(late_initcall, fn)
+ #define omap_late_initcall_sync(fn)	omap_initcall(late_initcall_sync, fn)
+ 
+-#endif	/* __ASSEMBLY__ */
++#define annotated_omap_initcall(level, fn, id, deps)	\
++static int __init __used __##fn(void)		\
++{						\
++	if (!soc_is_omap())			\
++		return 0;			\
++	return fn();				\
++}						\
++annotated_initcall(level, __##fn, id, deps)
+ 
++#endif	/* __ASSEMBLY__ */
+diff --git a/drivers/usb/storage/usb.h b/drivers/usb/storage/usb.h
+index da0ad32..f2ed368 100644
+--- a/drivers/usb/storage/usb.h
++++ b/drivers/usb/storage/usb.h
+@@ -218,4 +218,18 @@ static void __exit __driver##_exit(void) \
+ } \
+ module_exit(__driver##_exit)
+ 
++#define annotated_module_usb_stor_driver(__driver, __sht, __name, \
++					 __id, __deps) \
++static int __init __driver##_init(void) \
++{ \
++	usb_stor_host_template_init(&(__sht), __name, THIS_MODULE); \
++	return usb_register(&(__driver)); \
++} \
++annotated_module_init(__driver##_init, __id, __deps); \
++static void __exit __driver##_exit(void) \
++{ \
++	usb_deregister(&(__driver)); \
++} \
++module_exit(__driver##_exit)
++
+ #endif
+diff --git a/include/acpi/acpi_bus.h b/include/acpi/acpi_bus.h
+index 83061ca..42d0612 100644
+--- a/include/acpi/acpi_bus.h
++++ b/include/acpi/acpi_bus.h
+@@ -541,6 +541,19 @@ static inline bool acpi_device_enumerated(struct acpi_device *adev)
+ 	module_driver(__acpi_driver, acpi_bus_register_driver, \
+ 		      acpi_bus_unregister_driver)
+ 
++#define annotated_module_acpi_driver(__acpi_driver, __id, __deps) \
++static int __init __acpi_driver##_init(void) \
++{ \
++	return acpi_bus_register_driver(&(__acpi_driver)); \
++} \
++annotated_module_init_drv(__acpi_driver##_init, __id, __deps, \
++			  __acpi_driver.drv); \
++static void __exit __acpi_driver##_exit(void) \
++{ \
++	acpi_bus_unregister_driver(&(__acpi_driver)); \
++} \
++module_exit(__acpi_driver##_exit)
++
+ /*
+  * Bind physical devices with ACPI devices
+  */
+diff --git a/include/asm-generic/vmlinux.lds.h b/include/asm-generic/vmlinux.lds.h
+index 8bd374d..ad6cace 100644
+--- a/include/asm-generic/vmlinux.lds.h
++++ b/include/asm-generic/vmlinux.lds.h
+@@ -660,6 +660,12 @@
+ 		INIT_CALLS_LEVEL(7)					\
+ 		VMLINUX_SYMBOL(__initcall_end) = .;
+ 
++#define ANNOTATED_INITCALLS						\
++		. = ALIGN(32);						\
++		VMLINUX_SYMBOL(__annotated_initcall_start) = .;		\
++		*(.annotated_initcall.init)				\
++		VMLINUX_SYMBOL(__annotated_initcall_end) = .;
++
+ #define CON_INITCALL							\
+ 		VMLINUX_SYMBOL(__con_initcall_start) = .;		\
+ 		*(.con_initcall.init)					\
+@@ -816,6 +822,7 @@
+ 		INIT_DATA						\
+ 		INIT_SETUP(initsetup_align)				\
+ 		INIT_CALLS						\
++		ANNOTATED_INITCALLS					\
+ 		CON_INITCALL						\
+ 		SECURITY_INITCALL					\
+ 		INIT_RAM_FS						\
+diff --git a/include/linux/device.h b/include/linux/device.h
+index a2b4ea7..7320dc9 100644
+--- a/include/linux/device.h
++++ b/include/linux/device.h
+@@ -1321,4 +1321,18 @@ static int __init __driver##_init(void) \
+ } \
+ device_initcall(__driver##_init);
+ 
++#define annotated_module_driver(__driver, __register, __unregister, \
++				__id, __deps, ...) \
++static int __init __driver##_init(void) \
++{ \
++	return __register(&(__driver), ##__VA_ARGS__); \
++} \
++annotated_module_init_drv(__driver##_init, __id, __deps, __driver.driver); \
++static void __exit __driver##_exit(void) \
++{ \
++	__unregister(&(__driver), ##__VA_ARGS__); \
++} \
++module_exit(__driver##_exit)
++
++
+ #endif /* _DEVICE_H_ */
+diff --git a/include/linux/driver_ids.h b/include/linux/driver_ids.h
+new file mode 100644
+index 0000000..60964fe
+--- /dev/null
++++ b/include/linux/driver_ids.h
+@@ -0,0 +1,21 @@
++#ifndef _LINUX_DRIVER_IDS_H
++#define _LINUX_DRIVER_IDS_H
++
++/*
++ * In fact, the IDs listed here are IDs for initcalls, and not for
++ * drivers. But most of the time, a driver or subsystem has only one
++ * initcall, and talking about IDs for drivers makes more sense than
++ * talking about initcalls, something many people have no clear
++ * understanding about.
++ *
++ * Please use the name of the module as the name for the ID if
++ * something can be build as a module.
++ */
++
++enum {
++	drvid_unused,
++	/* To be filled */
++	drvid_max
++};
++
++#endif /* _LINUX_DRIVER_IDS_H */
+diff --git a/include/linux/i2c.h b/include/linux/i2c.h
+index e83a738..efe0e7d 100644
+--- a/include/linux/i2c.h
++++ b/include/linux/i2c.h
+@@ -629,6 +629,10 @@ static inline int i2c_adapter_id(struct i2c_adapter *adap)
+ 	module_driver(__i2c_driver, i2c_add_driver, \
+ 			i2c_del_driver)
+ 
++#define annotated_module_i2c_driver(__i2c_driver, __id, __deps) \
++	annotated_module_driver(__i2c_driver, i2c_add_driver, \
++			i2c_del_driver, __id, __deps)
++
+ #endif /* I2C */
+ 
+ #if IS_ENABLED(CONFIG_OF)
+diff --git a/include/linux/init.h b/include/linux/init.h
+index b449f37..758fd18 100644
+--- a/include/linux/init.h
++++ b/include/linux/init.h
+@@ -3,6 +3,9 @@
+ 
+ #include <linux/compiler.h>
+ #include <linux/types.h>
++#ifndef __ASSEMBLY__
++#include <linux/driver_ids.h>
++#endif
+ 
+ /* These macros are used to mark some functions or 
+  * initialized data (doesn't apply to uninitialized data)
+@@ -124,6 +127,17 @@
+ typedef int (*initcall_t)(void);
+ typedef void (*exitcall_t)(void);
+ 
++struct device_driver;
++
++struct _annotated_initcall {
++	const initcall_t initcall;
++	const unsigned id; /* from driver_ids.h */
++	const unsigned *dependencies;
++	const struct device_driver *driver;
++};
++extern const struct _annotated_initcall __annotated_initcall_start[],
++				  __annotated_initcall_end[];
++
+ extern initcall_t __con_initcall_start[], __con_initcall_end[];
+ extern initcall_t __security_initcall_start[], __security_initcall_end[];
+ 
+@@ -184,6 +198,18 @@ extern bool initcall_debug;
+ 	__attribute__((__section__(".initcall" #id ".init"))) = fn; \
+ 	LTO_REFERENCE_INITCALL(__initcall_##fn##id)
+ 
++#define __define_annotated_initcall(fn, __id, deps) \
++	static struct _annotated_initcall __annotated_initcall_##fn __used \
++	__attribute__((__section__(".annotated_initcall.init"))) = \
++		{ .initcall = fn, .id = __id, .dependencies = deps, \
++		  .driver = NULL }
++
++#define __define_annotated_initcall_drv(fn, __id, deps, drv) \
++	static struct _annotated_initcall __annotated_initcall_##fn __used \
++	__attribute__((__section__(".annotated_initcall.init"))) = \
++		{ .initcall = fn, .id = __id, .dependencies = deps, \
++		  .driver = &(drv) }
++
+ /*
+  * Early initcalls run before initializing SMP.
+  *
+@@ -216,6 +242,38 @@ extern bool initcall_debug;
+ #define late_initcall(fn)		__define_initcall(fn, 7)
+ #define late_initcall_sync(fn)		__define_initcall(fn, 7s)
+ 
++/*
++ * Annotated initcalls are accompanied by a struct device_driver.
++ * This makes initcalls identifiable and is used to order initcalls.
++ *
++ * If disabled, nothing is changed and the classic level based
++ * initialization sequence is in use.
++ */
++#ifdef CONFIG_ANNOTATED_INITCALLS
++#define annotated_module_init(fn, id, deps) \
++	__define_annotated_initcall(fn, id, deps)
++#define annotated_module_init_drv(fn, id, deps, drv) \
++	__define_annotated_initcall_drv(fn, id, deps, drv)
++#define annotated_initcall(level, fn, id, deps) \
++	__define_annotated_initcall(fn, id, deps)
++#define annotated_initcall_sync(level, fn, id, deps) \
++	__define_annotated_initcall(fn, id, deps)
++#define annotated_initcall_drv(level, fn, id, deps, drv) \
++	__define_annotated_initcall_drv(fn, id, deps, drv)
++#define annotated_initcall_drv_sync(level, fn, id, deps, drv) \
++	__define_annotated_initcall_drv(fn, id, deps, drv)
++#else
++#define annotated_module_init(fn, id, deps)	module_init(fn)
++#define annotated_module_init_drv(fn, id, deps, drv)	module_init(fn)
++#define annotated_initcall(level, fn, id, deps)	level ## _initcall(fn)
++#define annotated_initcall_sync(level, fn, id, deps) \
++	level ## _initcall_sync(fn)
++#define annotated_initcall_drv(level, fn, id, deps, drv) \
++	level ## _initcall(fn)
++#define annotated_initcall_drv_sync(level, fn, id, deps, drv) \
++	level ## _initcall_sync(fn)
++#endif
++
+ #define __initcall(fn) device_initcall(fn)
+ 
+ #define __exitcall(fn) \
+diff --git a/include/linux/module.h b/include/linux/module.h
+index 3a19c79..880fdda 100644
+--- a/include/linux/module.h
++++ b/include/linux/module.h
+@@ -120,6 +120,13 @@ extern void cleanup_module(void);
+ #define late_initcall(fn)		module_init(fn)
+ #define late_initcall_sync(fn)		module_init(fn)
+ 
++#define annotated_initcall(level, fn, id, deps)	module_init(fn)
++#define annotated_initcall_sync(level, fn, id, deps)	module_init(fn)
++#define annotated_initcall_drv(level, fn, id, deps, drv)	module_init(fn)
++#define annotated_initcall_drv_sync(level, fn, id, deps, drv)	module_init(fn)
++#define annotated_module_init(fn, id, deps)	module_init(fn)
++#define annotated_module_init_drv(fn, id, deps, drv)	module_init(fn)
++
+ #define console_initcall(fn)		module_init(fn)
+ #define security_initcall(fn)		module_init(fn)
+ 
+diff --git a/include/linux/pci.h b/include/linux/pci.h
+index 1d4eb60..8093898 100644
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -1162,6 +1162,10 @@ void pci_unregister_driver(struct pci_driver *dev);
+ 	module_driver(__pci_driver, pci_register_driver, \
+ 		       pci_unregister_driver)
+ 
++#define annotated_module_pci_driver(__pci_driver, __id, __dependencies) \
++	annotated_module_driver(__pci_driver, pci_register_driver, \
++		       pci_unregister_driver, __id, __dependencies)
++
+ struct pci_driver *pci_dev_driver(const struct pci_dev *dev);
+ int pci_add_dynid(struct pci_driver *drv,
+ 		  unsigned int vendor, unsigned int device,
+diff --git a/include/linux/phy.h b/include/linux/phy.h
+index a26c3f8..e5377fb 100644
+--- a/include/linux/phy.h
++++ b/include/linux/phy.h
+@@ -824,4 +824,20 @@ module_exit(phy_module_exit)
+ #define module_phy_driver(__phy_drivers)				\
+ 	phy_module_driver(__phy_drivers, ARRAY_SIZE(__phy_drivers))
+ 
++#define annotated_phy_module_driver(__phy_drivers, __count, id, deps)	\
++static int __init phy_module_init(void)					\
++{									\
++	return phy_drivers_register(__phy_drivers, __count);		\
++}									\
++annotated_module_init(phy_module_init, id, deps);			\
++static void __exit phy_module_exit(void)				\
++{									\
++	phy_drivers_unregister(__phy_drivers, __count);			\
++}									\
++module_exit(phy_module_exit)
++
++#define annotated_module_phy_driver(__phy_drivers, id, deps)		\
++	annotated_phy_module_driver(__phy_drivers,			\
++				    ARRAY_SIZE(__phy_drivers), id, deps)
++
+ #endif /* __PHY_H */
+diff --git a/include/linux/platform_device.h b/include/linux/platform_device.h
+index bba08f4..10452cb 100644
+--- a/include/linux/platform_device.h
++++ b/include/linux/platform_device.h
+@@ -218,9 +218,29 @@ static inline void platform_set_drvdata(struct platform_device *pdev,
+  * boilerplate.  Each module may only use this macro once, and
+  * calling it replaces module_init() and module_exit()
+  */
+-#define module_platform_driver(__platform_driver) \
+-	module_driver(__platform_driver, platform_driver_register, \
+-			platform_driver_unregister)
++#define module_platform_driver(__driver) \
++static int __init __driver##_init(void) \
++{ \
++	return platform_driver_register(&(__driver)); \
++} \
++module_init(__driver##_init); \
++static void __exit __driver##_exit(void) \
++{ \
++	platform_driver_unregister(&(__driver)); \
++} \
++module_exit(__driver##_exit)
++
++#define annotated_module_platform_driver(__driver, __id, __deps) \
++static int __init __driver##_init(void) \
++{ \
++	return platform_driver_register(&(__driver)); \
++} \
++annotated_module_init_drv(__driver##_init, __id, __deps, __driver.driver); \
++static void __exit __driver##_exit(void) \
++{ \
++	platform_driver_unregister(&(__driver)); \
++} \
++module_exit(__driver##_exit)
+ 
+ /* builtin_platform_driver() - Helper macro for builtin drivers that
+  * don't do anything special in driver init.  This eliminates some
+@@ -249,6 +269,21 @@ static void __exit __platform_driver##_exit(void) \
+ } \
+ module_exit(__platform_driver##_exit);
+ 
++#define annotated_module_platform_driver_probe(__platform_driver, \
++				__platform_probe, __id, __deps) \
++static int __init __platform_driver##_init(void) \
++{ \
++	return platform_driver_probe(&(__platform_driver), \
++				     __platform_probe);    \
++} \
++annotated_module_init_drv(__platform_driver##_init, __id, __deps, \
++			  __platform_driver.driver); \
++static void __exit __platform_driver##_exit(void) \
++{ \
++	platform_driver_unregister(&(__platform_driver)); \
++} \
++module_exit(__platform_driver##_exit)
++
+ /* builtin_platform_driver_probe() - Helper macro for drivers that don't do
+  * anything special in device init.  This eliminates some boilerplate.  Each
+  * driver may only use this macro once, and using it replaces device_initcall.
+diff --git a/include/linux/serio.h b/include/linux/serio.h
+index 9f779c7..e5a9ef6 100644
+--- a/include/linux/serio.h
++++ b/include/linux/serio.h
+@@ -105,6 +105,11 @@ void serio_unregister_driver(struct serio_driver *drv);
+ 	module_driver(__serio_driver, serio_register_driver, \
+ 		       serio_unregister_driver)
+ 
++#define annotated_module_serio_driver(__serio_driver, id, deps) \
++	annotated_module_driver(__serio_driver, serio_register_driver, \
++		       serio_unregister_driver, id, deps)
++
++
+ static inline int serio_write(struct serio *serio, unsigned char data)
+ {
+ 	if (serio->write)
+diff --git a/include/linux/usb.h b/include/linux/usb.h
+index 447fe29..f8d7a15 100644
+--- a/include/linux/usb.h
++++ b/include/linux/usb.h
+@@ -1187,6 +1187,18 @@ extern void usb_deregister(struct usb_driver *);
+ 	module_driver(__usb_driver, usb_register, \
+ 		       usb_deregister)
+ 
++#define annotated_module_usb_driver(__usb_driver, __id, __deps) \
++static int __init __usb_driver##_init(void) \
++{ \
++	return usb_register(&(__usb_driver)); \
++} \
++annotated_module_init(__usb_driver##_init, __id, __deps); \
++static void __exit __usb_driver##_exit(void) \
++{ \
++	usb_deregister(&(__usb_driver)); \
++} \
++module_exit(__usb_driver##_exit)
++
+ extern int usb_register_device_driver(struct usb_device_driver *,
+ 			struct module *);
+ extern void usb_deregister_device_driver(struct usb_device_driver *);
+diff --git a/init/Kconfig b/init/Kconfig
+index af09b4f..5cfd7c4 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -26,6 +26,9 @@ config IRQ_WORK
+ config BUILDTIME_EXTABLE_SORT
+ 	bool
+ 
++config ANNOTATED_INITCALLS
++	bool
++
+ menu "General setup"
+ 
+ config BROKEN
+-- 
+2.1.0
+

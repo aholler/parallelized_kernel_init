@@ -1,0 +1,85 @@
+From 6a612f3da698490fe81021cd883ba1086c8a1809 Mon Sep 17 00:00:00 2001
+From: Alexander Holler <holler@ahsoftware.de>
+Date: Wed, 14 Oct 2015 19:45:57 +0200
+Subject: [PATCH 04/15] init: deps: order network interfaces by link order
+
+In order to provide stable interface numbers, network interface drivers
+will be ordered by the link order. This is easy to accomplish by adding
+dependencies.
+
+Assuming three different ethernet-drivers, without any special code,
+the dependency graph would not require any special order inbetween them
+and would look like that:
+
+    eth-driver-base
+   /      |       \
+eth-x   eth-y    eth-z
+
+Now we just add dependencies. With the additional dependencies the graph
+looks like:
+
+ eth-driver-base
+  |     | |
+eth-x   | |
+  |     | |
+eth-y  -| |
+  |       |
+eth-z  ---|
+
+Signed-off-by: Alexander Holler <holler@ahsoftware.de>
+---
+ include/linux/driver_ids.h | 11 +++++++++++
+ init/dependencies.c        |  9 +++++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/include/linux/driver_ids.h b/include/linux/driver_ids.h
+index 60964fe..1133a68 100644
+--- a/include/linux/driver_ids.h
++++ b/include/linux/driver_ids.h
+@@ -15,6 +15,17 @@
+ enum {
+ 	drvid_unused,
+ 	/* To be filled */
++
++	/*
++	 * Network drivers will be ordered according to the link order
++	 * (which means not necessarily according to their appearance
++	 * here).
++	 * This provides stable interface numbers.
++	 * Therefor their IDs have to be in the following block.
++	 */
++	drvid_network_drivers_start,
++	drvid_network_drivers_end,
++
+ 	drvid_max
+ };
+ 
+diff --git a/init/dependencies.c b/init/dependencies.c
+index b484f67..027fc4b 100644
+--- a/init/dependencies.c
++++ b/init/dependencies.c
+@@ -301,12 +301,21 @@ static int __init add_dependencies(void)
+ static void __init build_inventory(void)
+ {
+ 	const struct _annotated_initcall *ac;
++	unsigned id_last_network_driver = 0;
+ 
+ 	ac = __annotated_initcall_start;
+ 	for (; ac < __annotated_initcall_end; ++ac) {
+ 		include_node[ac->id] = true;
+ 		annotated_initcall_by_drvid[ac->id] = ac;
+ 		nvertices = max(nvertices, ac->id);
++		/* order network drivers by link order*/
++		if (ac->id > drvid_network_drivers_start &&
++				ac->id < drvid_network_drivers_end) {
++			if (id_last_network_driver)
++				add_initcall_dependency(ac->id,
++					id_last_network_driver);
++			id_last_network_driver = ac->id;
++		}
+ 	}
+ }
+ 
+-- 
+2.7.4
+

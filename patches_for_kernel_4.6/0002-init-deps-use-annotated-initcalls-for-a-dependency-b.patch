@@ -1,0 +1,565 @@
+From bbb301bad99d47408edfc8abe5651a1f7cb996d6 Mon Sep 17 00:00:00 2001
+From: Alexander Holler <holler@ahsoftware.de>
+Date: Tue, 6 Oct 2015 18:06:48 +0200
+Subject: [PATCH 02/15] init: deps: use annotated initcalls for a dependency
+ based (optionally parallelized) init
+
+Based on the dependencies provided by annotated initcalls, this patch
+introduces a topological sort to sort initcalls and (optionally) uses
+multiple threads to call initcalls.
+
+If the feature is disabled, nothing changes.
+
+Signed-off-by: Alexander Holler <holler@ahsoftware.de>
+---
+ include/linux/init.h |   6 +
+ init/.gitignore      |   1 +
+ init/Kconfig.deps    |  38 +++++
+ init/Makefile        |  15 ++
+ init/dependencies.c  | 394 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ init/main.c          |  10 +-
+ lib/Kconfig.debug    |   2 +
+ 7 files changed, 465 insertions(+), 1 deletion(-)
+ create mode 100644 init/.gitignore
+ create mode 100644 init/Kconfig.deps
+ create mode 100644 init/dependencies.c
+
+diff --git a/include/linux/init.h b/include/linux/init.h
+index 4dff596..6d6f7bf 100644
+--- a/include/linux/init.h
++++ b/include/linux/init.h
+@@ -164,6 +164,12 @@ extern void (*late_time_init)(void);
+ 
+ extern bool initcall_debug;
+ 
++/* Defined in init/dependencies.c */
++void __init do_annotated_initcalls(void);
++
++/* id_dependency will be initialized before id */
++int __init add_initcall_dependency(unsigned id, unsigned id_dependency);
++
+ #endif
+   
+ #ifndef MODULE
+diff --git a/init/.gitignore b/init/.gitignore
+new file mode 100644
+index 0000000..38e6d06
+--- /dev/null
++++ b/init/.gitignore
+@@ -0,0 +1 @@
++driver_names.c
+diff --git a/init/Kconfig.deps b/init/Kconfig.deps
+new file mode 100644
+index 0000000..9ced0d4
+--- /dev/null
++++ b/init/Kconfig.deps
+@@ -0,0 +1,38 @@
++config DEPENDENCIES
++	bool "Use dependency based initialization sequence (DO NOT USE)"
++	select ANNOTATED_INITCALLS
++	help
++	  This will likely crash your kernel at startup. You have been warned.
++	  That means you should make sure you have a working backup kernel
++	  you can boot from in case the kernel with this feature turned on
++	  crashes.
++	  In order to benefit from this feature, statically linked drivers
++	  have to provide dependencies.
++
++config DEPENDENCIES_PRINT_INIT_ORDER
++	bool "Print dependency based initialization order"
++	depends on DEPENDENCIES
++	help
++	  Used for debugging purposes.
++
++config DEPENDENCIES_PRINT_CALLS
++	bool "Show when annotated initcalls are actually called"
++	depends on DEPENDENCIES
++	help
++	  Used for debugging purposes.
++
++config DEPENDENCIES_PARALLEL
++	bool "Call annotated initcalls in parallel"
++	depends on DEPENDENCIES
++	help
++	  Calculates which (annotated) initcalls can be called in parallel
++	  and calls them using multiple threads.
++
++config DEPENDENCIES_THREADS
++	int "Number of threads to use for parallel initialization"
++	depends on DEPENDENCIES_PARALLEL
++	default 0
++	help
++	  0 means the number of threads used for parallel initialization
++	  of drivers equals the number of online CPUs.
++	  1 means the threaded initialization is disabled.
+diff --git a/init/Makefile b/init/Makefile
+index 7bc47ee..6a8c22c 100644
+--- a/init/Makefile
++++ b/init/Makefile
+@@ -9,6 +9,7 @@ else
+ obj-$(CONFIG_BLK_DEV_INITRD)   += initramfs.o
+ endif
+ obj-$(CONFIG_GENERIC_CALIBRATE_DELAY) += calibrate.o
++obj-$(CONFIG_DEPENDENCIES) += dependencies.o
+ 
+ ifneq ($(CONFIG_ARCH_INIT_TASK),y)
+ obj-y                          += init_task.o
+@@ -19,6 +20,20 @@ mounts-$(CONFIG_BLK_DEV_RAM)	+= do_mounts_rd.o
+ mounts-$(CONFIG_BLK_DEV_INITRD)	+= do_mounts_initrd.o
+ mounts-$(CONFIG_BLK_DEV_MD)	+= do_mounts_md.o
+ 
++quiet_cmd_make-driver_names = GEN     $@
++      cmd_make-driver_names = sed $< > $@ \
++		-e 's/^\tdrvid_\(.*\),/\t"\1",/' \
++		-e 's/^\tdrvid_max$$/\t"max"/' \
++		-e 's/^enum {/static const char *driver_names[] __initdata = {/' \
++		-e '/^\#ifndef _LINUX_DRIVER_IDS_H$$/d' \
++		-e '/^\#define _LINUX_DRIVER_IDS_H$$/d' \
++		-e '/^\#endif \/\* _LINUX_DRIVER_IDS_H \*\/$$/d'
++
++$(obj)/driver_names.c: $(srctree)/include/linux/driver_ids.h
++	$(call cmd,make-driver_names)
++
++$(obj)/dependencies.o: $(obj)/driver_names.c
++
+ # dependencies on generated files need to be listed explicitly
+ $(obj)/version.o: include/generated/compile.h
+ 
+diff --git a/init/dependencies.c b/init/dependencies.c
+new file mode 100644
+index 0000000..c47817c
+--- /dev/null
++++ b/init/dependencies.c
+@@ -0,0 +1,394 @@
++/*
++ * Code for building a deterministic initialization order
++ * based on dependencies.
++ *
++ * Copyright (C) 2014 Alexander Holler <holler@ahsoftware.de>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version
++ * 2 of the License, or (at your option) any later version.
++ */
++
++/* #define DEBUG */
++
++#include <linux/kthread.h>
++#include <linux/sort.h>
++#include <linux/device.h>
++#include <linux/mod_devicetable.h>
++#include <linux/init.h>
++
++#if defined(CONFIG_DEPENDENCIES_PRINT_INIT_ORDER) \
++	|| defined(CONFIG_DEPENDENCIES_PRINT_CALLS)
++#include "driver_names.c"
++#endif
++
++#define MAX_VERTICES drvid_max /* maximum number of vertices */
++#define MAX_EDGES (MAX_VERTICES*5) /* maximum number of edges (dependencies) */
++
++struct edgenode {
++	unsigned y; /* initcall ID */
++#ifdef CONFIG_DEPENDENCIES_PARALLEL
++	unsigned x;
++#endif
++	struct edgenode *next; /* next edge in list */
++};
++
++/* Vertex numbers correspond to initcall IDs. */
++static struct edgenode edge_slots[MAX_EDGES] __initdata; /* avoid kmalloc */
++static struct edgenode *edges[MAX_VERTICES] __initdata; /* adjacency info */
++static unsigned nedges __initdata; /* number of edges */
++static unsigned nvertices __initdata; /* number of vertices */
++static bool processed[MAX_VERTICES] __initdata;
++static bool include_node[MAX_VERTICES] __initdata;
++static bool discovered[MAX_VERTICES] __initdata;
++
++static unsigned order[MAX_VERTICES] __initdata;
++static unsigned norder __initdata;
++static const struct _annotated_initcall
++		*annotated_initcall_by_drvid[MAX_VERTICES] __initdata;
++
++int __init add_initcall_dependency(unsigned id, unsigned id_dependency)
++{
++	struct edgenode *p;
++
++	if (!id || !id_dependency)
++		return 0; /* ignore root */
++	if (unlikely(nedges >= MAX_EDGES)) {
++		pr_err("init: maximum number of edges (%u) reached!\n",
++			MAX_EDGES);
++		return -EINVAL;
++	}
++	if (unlikely(id == id_dependency))
++		return 0;
++	if (!include_node[id] || !include_node[id_dependency])
++		return 0; /* ignore edges for initcalls not included */
++	p = &edge_slots[nedges++];
++	p->y = id_dependency;
++#ifdef CONFIG_DEPENDENCIES_PARALLEL
++	p->x = id;
++#endif
++	/* insert at head of list */
++	p->next = edges[id];
++	edges[id] = p;
++
++	return 0;
++}
++
++static int __init depth_first_search(unsigned v)
++{
++	struct edgenode *p;
++	unsigned y; /* successor vertex */
++
++	discovered[v] = 1;
++	p = edges[v];
++	while (p) {
++		y = p->y;
++		if (unlikely(discovered[y] && !processed[y])) {
++			pr_err("init: cycle found %u <-> %u!\n", v, y);
++			return -EINVAL;
++		}
++		if (!discovered[y] && depth_first_search(y))
++			return -EINVAL;
++		p = p->next;
++	}
++	order[norder++] = v;
++	processed[v] = 1;
++	return 0;
++}
++
++static int __init topological_sort(void)
++{
++	unsigned i;
++
++	for (i = 1; i <= nvertices; ++i)
++		if (!discovered[i] && include_node[i])
++			if (depth_first_search(i))
++				return -EINVAL;
++	return 0;
++}
++
++#ifdef CONFIG_DEPENDENCIES_PARALLEL
++/*
++ * The algorithm I've used below to calculate the max. distance for
++ * nodes to the root node likely isn't the fasted. But based on the
++ * already done implementation of the topological sort, this is an
++ * easy way to achieve this. Instead of first doing an topological
++ * sort and then using the stuff below to calculate the distances,
++ * using an algorithm which does spit out distances directly would
++ * be likely faster (also we are talking here about a few ms).
++ * If you want to spend the time, you could have a look e.g. at the
++ * topic 'layered graph drawing'.
++ */
++/* max. distance from a node to root */
++static unsigned distance[MAX_VERTICES] __initdata;
++static struct {
++	unsigned start;
++	unsigned length;
++} tgroup[20] __initdata;
++static unsigned count_groups __initdata;
++static __initdata DECLARE_COMPLETION(initcall_thread_done);
++static atomic_t shared_counter __initdata;
++static atomic_t count_initcall_threads __initdata;
++static atomic_t ostart __initdata;
++static atomic_t ocount __initdata;
++static atomic_t current_group __initdata;
++static unsigned num_threads __initdata;
++static __initdata DECLARE_WAIT_QUEUE_HEAD(group_waitqueue);
++
++static void __init calc_max_distance(uint32_t v)
++{
++	unsigned i;
++	unsigned max_dist = 0;
++
++	for (i = 0; i < nedges; ++i)
++		if (edge_slots[i].x == v)
++			max_dist = max(max_dist,
++				distance[edge_slots[i].y] + 1);
++	distance[v] = max_dist;
++}
++
++static void __init calc_distances(void)
++{
++	unsigned i;
++
++	for (i = 0; i < norder; ++i)
++		calc_max_distance(order[i]);
++}
++
++static int __init compare_by_distance(const void *lhs, const void *rhs)
++{
++	if (distance[*(unsigned *)lhs] < distance[*(unsigned *)rhs])
++		return -1;
++	if (distance[*(unsigned *)lhs] > distance[*(unsigned *)rhs])
++		return 1;
++	return 0;
++}
++
++static void __init build_order_by_distance(void)
++{
++	calc_distances();
++	sort(order, norder, sizeof(unsigned), &compare_by_distance, NULL);
++}
++
++static void __init build_tgroups(void)
++{
++	unsigned i;
++	unsigned dist = 0;
++
++	for (i = 0; i < norder; ++i) {
++		if (distance[order[i]] != dist) {
++			dist = distance[order[i]];
++			count_groups++;
++			tgroup[count_groups].start = i;
++		}
++		tgroup[count_groups].length++;
++	}
++	count_groups++;
++#ifdef DEBUG
++	for (i = 0; i < count_groups; ++i)
++		pr_info("init: group %u length %u (start %u)\n", i,
++				tgroup[i].length, tgroup[i].start);
++#endif
++}
++
++static int __init initcall_thread(void *thread_nr)
++{
++	int i;
++	unsigned group;
++	int start, count;
++	const struct _annotated_initcall *ac;
++	DEFINE_WAIT(wait);
++
++	while ((group = atomic_read(&current_group)) < count_groups) {
++		start = atomic_read(&ostart);
++		count = atomic_read(&ocount);
++		while ((i = atomic_dec_return(&shared_counter)) >= 0) {
++			ac = annotated_initcall_by_drvid[
++					order[start + count - 1 - i]];
++#ifdef CONFIG_DEPENDENCIES_PRINT_CALLS
++			pr_info("init: thread %lu calling initcall for driver %s (ID %u)\n",
++				(unsigned long)thread_nr,
++				driver_names[ac->id], ac->id);
++#endif
++			do_one_initcall(*ac->initcall);
++		}
++		prepare_to_wait(&group_waitqueue, &wait, TASK_UNINTERRUPTIBLE);
++		if (!atomic_dec_and_test(&count_initcall_threads)) {
++			/*
++			 * The current group was processed, sleep until the
++			 * last thread finished work on this group, changes
++			 * the group and wakes up all threads.
++			 */
++			schedule();
++			finish_wait(&group_waitqueue, &wait);
++			continue;
++		}
++		atomic_inc(&current_group);
++		atomic_set(&count_initcall_threads, num_threads);
++		if (++group >= count_groups) {
++			/*
++			 * All groups processed and all threads finished.
++			 * Prepare to process unordered annotated
++			 * initcalls and wake up other threads to call
++			 * them too.
++			 */
++			atomic_set(&shared_counter,
++				__annotated_initcall_end -
++					__annotated_initcall_start);
++			wake_up_all(&group_waitqueue);
++			finish_wait(&group_waitqueue, &wait);
++			break;
++		}
++		/*
++		 * Finalize the switch to the next group and wake up other
++		 * threads to process the new group too.
++		 */
++		pr_debug("init: thread %lu changes group\n",
++			(unsigned long)thread_nr);
++		atomic_set(&ostart, tgroup[group].start);
++		atomic_set(&ocount, tgroup[group].length);
++		atomic_set(&shared_counter, tgroup[group].length);
++		wake_up_all(&group_waitqueue);
++		finish_wait(&group_waitqueue, &wait);
++	}
++	if (atomic_dec_and_test(&count_initcall_threads))
++		complete(&initcall_thread_done);
++	do_exit(0);
++	return 0;
++}
++#else
++#define build_order_by_distance()
++#define build_tgroups()
++#endif /* CONFIG_DEPENDENCIES_PARALLEL */
++
++static void __init init_drivers_non_threaded(void)
++{
++	unsigned i;
++	const struct _annotated_initcall *ac;
++
++	for (i = 0; i < norder; ++i) {
++		ac = annotated_initcall_by_drvid[order[i]];
++#ifdef CONFIG_DEPENDENCIES_PRINT_CALLS
++		pr_info("init: calling initcall for driver %s (ID %u)\n",
++			driver_names[ac->id], ac->id);
++#endif
++		do_one_initcall(*ac->initcall);
++	}
++}
++
++static int __init add_dependencies(void)
++{
++	int rc;
++	const struct _annotated_initcall *ac;
++	const unsigned *dep;
++	unsigned i;
++
++	ac = __annotated_initcall_start;
++	for (; ac < __annotated_initcall_end; ++ac) {
++		dep = ac->dependencies;
++		if (dep)
++			for (i = 0; dep[i]; ++i) {
++				rc = add_initcall_dependency(ac->id, dep[i]);
++				if (unlikely(rc))
++					return rc;
++			}
++	}
++	return 0;
++}
++
++static void __init build_inventory(void)
++{
++	const struct _annotated_initcall *ac;
++
++	ac = __annotated_initcall_start;
++	for (; ac < __annotated_initcall_end; ++ac) {
++		include_node[ac->id] = true;
++		annotated_initcall_by_drvid[ac->id] = ac;
++		nvertices = max(nvertices, ac->id);
++	}
++}
++
++#ifdef CONFIG_DEPENDENCIES_PRINT_INIT_ORDER
++static void __init print_order(void)
++{
++	unsigned i;
++
++	pr_info("init: initialization order:\n");
++	for (i = 0; i < norder; ++i) {
++#ifdef CONFIG_DEPENDENCIES_PARALLEL
++		pr_info("init: %u (group %u) %s (ID %u)\n", i,
++			distance[order[i]], driver_names[order[i]], order[i]);
++#else
++		pr_info("init: %u %s (ID %u)\n", i,
++			driver_names[order[i]], order[i]);
++#endif
++	}
++}
++#else
++#define print_order()
++#endif
++
++static int __init build_order(void)
++{
++	int rc = 0;
++
++	build_inventory();
++	add_dependencies();
++	if (topological_sort())
++		return -EINVAL; /* cycle found */
++	pr_debug("init: vertices: %u edges %u count %u\n",
++					nvertices, nedges, norder);
++	build_order_by_distance();
++	build_tgroups();
++	print_order();
++	return rc;
++}
++
++void __init do_annotated_initcalls(void)
++{
++	unsigned i;
++
++	i = __annotated_initcall_end - __annotated_initcall_start;
++	if (!i)
++		return;
++
++	if (build_order()) {
++		/*
++		 * Building order failed (likely because of a dependency
++		 * circle). Try to boot anyway by calling all annotated
++		 * initcalls unordered.
++		 */
++		const struct _annotated_initcall *ac;
++
++		ac = __annotated_initcall_start;
++		for (; ac < __annotated_initcall_end; ++ac)
++			do_one_initcall(*ac->initcall);
++		return;
++	}
++
++#ifndef CONFIG_DEPENDENCIES_PARALLEL
++	init_drivers_non_threaded();
++#else
++	if (CONFIG_DEPENDENCIES_THREADS == 0)
++		num_threads = num_online_cpus();
++	else
++		num_threads = CONFIG_DEPENDENCIES_THREADS;
++	if (num_threads < 2) {
++		init_drivers_non_threaded();
++		return;
++	}
++	pr_debug("init: using %u threads to call annotated initcalls\n",
++				num_threads);
++	atomic_set(&count_initcall_threads, num_threads);
++	atomic_set(&ostart, tgroup[0].start);
++	atomic_set(&ocount, tgroup[0].length);
++	atomic_set(&shared_counter, tgroup[0].length);
++	atomic_set(&current_group, 0);
++	for (i = 0; i < num_threads; ++i)
++		kthread_run(initcall_thread, (void *)(unsigned long)i,
++			"initcalls");
++	wait_for_completion(&initcall_thread_done);
++	pr_debug("init: all threads done\n");
++#endif
++}
+diff --git a/init/main.c b/init/main.c
+index b3c6e36..dddc10c 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -839,8 +839,16 @@ static void __init do_initcalls(void)
+ {
+ 	int level;
+ 
+-	for (level = 0; level < ARRAY_SIZE(initcall_levels) - 1; level++)
++	for (level = 0; level < ARRAY_SIZE(initcall_levels) - 3; level++)
+ 		do_initcall_level(level);
++#ifdef CONFIG_DEPENDENCIES
++	/* call annotated drivers (sorted) */
++	do_annotated_initcalls();
++#endif
++	/* call normal and not annoted drivers (not sorted) */
++	do_initcall_level(level++);
++	/* call late drivers */
++	do_initcall_level(level);
+ }
+ 
+ /*
+diff --git a/lib/Kconfig.debug b/lib/Kconfig.debug
+index 1e9a607..6b78690 100644
+--- a/lib/Kconfig.debug
++++ b/lib/Kconfig.debug
+@@ -1962,6 +1962,8 @@ source "samples/Kconfig"
+ 
+ source "lib/Kconfig.kgdb"
+ 
++source "init/Kconfig.deps"
++
+ source "lib/Kconfig.ubsan"
+ 
+ config ARCH_HAS_DEVMEM_IS_ALLOWED
+-- 
+2.7.4
+

@@ -1,0 +1,660 @@
+From bdfd82ca213aaad87cb752d3b2cf24a45c014b26 Mon Sep 17 00:00:00 2001
+From: Alexander Holler <holler@ahsoftware.de>
+Date: Fri, 2 Oct 2015 11:06:24 +0200
+Subject: [PATCH 10/15] init: deps: IDs for annotated initcalls
+
+These patch contains the IDs for initcalls I've annotated.
+
+This patch is NOT meant for merging into mainline in its current form.
+
+It should be discussed about how to add these IDs and in which form, if
+the feature ends up in mainline at all.
+
+E.g. it could make sense to split this file into several files in order
+to avoid merge conflicts.
+
+It also might make sense to prefill this file with IDs for many drivers.
+
+E.g. the following script will use a modules.dep file to produce IDs for
+modules. It's meant to be used on a very complete modules.dep build through
+make allmodconfig && make -jN modules && make modules_install.
+
+----
+if [ $# -ne 2 -o ! -f "$1" -o -f "$2" ]; then
+  echo "Builds drvids"
+  echo "usage: $(basename $0) modules.dep headerfile"
+  echo "headerfile must not exist"
+  exit 1
+fi
+
+echo -e "#ifndef _LINUX_DRIVER_IDS_H\n#define _LINUX_DRIVER_IDS_H\n\nenum {\n\tdrvid_unused," > "$2"
+sed -e 's%.*/\(.*\).ko.gz:.*%\tdrvid_\1,%' "$1" | sed -e 's/-/_/g' >> "$2"
+echo -e "\tdrvid_max\n};\n\n#endif /* _LINUX_DRIVER_IDS_H */\n" >> "$2"
+----
+
+Signed-off-by: Alexander Holler <holler@ahsoftware.de>
+---
+ include/linux/driver_ids.h | 589 ++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 588 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux/driver_ids.h b/include/linux/driver_ids.h
+index 330080e..7a545bf 100644
+--- a/include/linux/driver_ids.h
++++ b/include/linux/driver_ids.h
+@@ -14,7 +14,220 @@
+ 
+ enum {
+ 	drvid_unused,
+-	/* To be filled */
++
++	/* arch/arm/common */
++	drvid_edma,
++	/* arch/arm/crypto */
++	drvid_aes_arm,
++	drvid_aes_ce_arm,
++	drvid_aesbs,
++	drvid_sha1_mod,
++	drvid_sha1_neon,
++	/* arch/arm/kernel */
++	drvid_customize_machine,
++	drvid_proc_cpu,
++	drvid_proc_dma_arm,
++	drvid_swp_emulation,
++	/* arch/arm/mach-imx */
++	drvid_imx_gpc,
++	drvid_imx_mmdc,
++	/* arch/arm/mach-omap2 */
++	drvid_omap_i2c_cmdline,
++	/* arch/arm/mm */
++	drvid_alignment,
++	drvid_atomic_pool,
++	drvid_dma_debug,
++	/* arch/arm/plat-omap */
++	drvid_omap_dm_timer,
++	/* arch/x86/crypto */
++	drvid_aes_x86,
++	/* arch/x86/kernel */
++	drvid_apm,
++	drvid_cpufreq_tsc,
++	drvid_hpet_late,
++	drvid_kernel_offset_dumper,
++	drvid_pci_iommu,
++	drvid_pmc_atom,
++	drvid_reboot,
++	drvid_rtc_cmos_x86,
++	drvid_tsc_clocksource,
++	/* arch/x86/kernel/acpi */
++	drvid_ffh_cstate,
++	drvid_hpet_insert_resource,
++	/* arch/x86/kernel/cpu/mcheck */
++	drvid_mcheck,
++	drvid_mcheck_debugfs,
++	drvid_thermal_throttle,
++	/* arch/x86/kernel/cpu/microcode */
++	drvid_microcode,
++	/* arch/x86/pci */
++	drvid_pci_arch,
++	drvid_pci_subsys,
++	drvid_pcibios_assign_resources,
++	/* block */
++	drvid_bio,
++	drvid_blk_ioc,
++	drvid_blk_mq,
++	drvid_blk_scsi_ioctl,
++	drvid_blk_settings,
++	drvid_blk_softirq,
++	drvid_bsg,
++	drvid_cfq_iosched,
++	drvid_deadline_iosched,
++	drvid_genhd,
++	drvid_noop,
++	drvid_proc_genhd,
++	/* crypto */
++	drvid_aes_generic,
++	drvid_authenc,
++	drvid_authencesn,
++	drvid_cbc,
++	drvid_chainiv,
++	drvid_crc32c,
++	drvid_crct10dif,
++	drvid_cryptd,
++	drvid_crypto_algapi,
++	drvid_crypto_null_mod,
++	drvid_crypto_wq,
++	drvid_cryptomgr,
++	drvid_deflate,
++	drvid_des_generic,
++	drvid_ecb,
++	drvid_eseqiv,
++	drvid_hmac,
++	drvid_lzo,
++	drvid_mcryptd,
++	drvid_md5,
++	drvid_michael_mic,
++	drvid_rsa,
++	drvid_sha1_generic,
++	drvid_sha256_generic,
++	drvid_sha512_generic,
++	drvid_xor,
++	/* crypto/asymmetric_keys */
++	drvid_asymmetric_key,
++	drvid_x509,
++	/* drivers/acpi */
++	drvid_acpi,
++	drvid_acpi_ac,
++	drvid_acpi_battery,
++	drvid_acpi_button,
++	drvid_acpi_event,
++	drvid_acpi_fan,
++	drvid_acpi_processor_driver,
++	drvid_acpi_reserve_resources,
++	drvid_acpi_sbs,
++	drvid_acpi_smb_hc,
++	drvid_acpi_thermal,
++	drvid_acpi_video,
++	/* drivers/ata */
++	drvid_ahci,
++	drvid_ahci_imx,
++	drvid_ahci_pci,
++	drvid_ata,
++	drvid_ata_generic,
++	drvid_ata_piix,
++	drvid_pata_acpi,
++	drvid_pata_amd,
++	drvid_pata_jmicron,
++	drvid_pata_mpiix,
++	drvid_pata_oldpiix,
++	drvid_pata_sch,
++	drvid_pata_sis,
++	/* drivers/base */
++	drvid_firmware_class,
++	/* drivers/block */
++	drvid_loop,
++	/* drivers/bus */
++	drvid_omap_l3_noc,
++	drvid_omap_l3_smx,
++	drvid_omap_ocp2scp,
++	drvid_imx_weim,
++	/* drivers/char */
++	drvid_agpgart,
++	drvid_genrtc,
++	drvid_hpet,
++	drvid_mem,
++	drvid_misc,
++	drvid_nvram,
++	drvid_char_rtc,
++	/* drivers/char/agp */
++	drvid_agp_intel,
++	/* drivers/char/hw_random */
++	drvid_hwrng,
++	drvid_omap3_rom_rng,
++	drvid_omap_rng,
++	/* drivers/clocksource */
++	drvid_acpi_pm_clocksource,
++	/* drivers/connector */
++	drvid_cn,
++	drvid_cn_proc,
++	/* drivers/cpufreq */
++	drvid_acpi_cpufreq,
++	drvid_cpufreq,
++	drvid_cpufreq_gov_dbs,
++	drvid_cpufreq_gov_performance,
++	drvid_cpufreq_ondemand,
++	drvid_cpufreq_powersave,
++	drvid_cpufreq_stats,
++	drvid_imx6q_cpufreq,
++	drvid_kirkwood_cpufreq,
++	drvid_omap_cpufreq,
++	/* drivers/cpuidle */
++	drvid_cpuidle,
++	drvid_cpuidle_arm,
++	drvid_kirkwood_cpuidle,
++	/* drivers/crypto */
++	drvid_crypto_user,
++	drvid_mv_crypto,
++	drvid_omap_aes,
++	drvid_omap_sham,
++	drvid_sahara,
++	/* drivers/crypto/marvell */
++	drvid_marvell_cesa,
++	/* drivers/dma */
++	drvid_cpp41_dma,
++	drvid_dma_bus,
++	drvid_dma_channel_table,
++	drvid_imx_sdma,
++	drvid_mv_xor,
++	drvid_mxs_dma,
++	drvid_omap_dma,
++	/* drivers/firmware */
++	drvid_dmi,
++	/* drivers/gpio */
++	drvid_bgpio,
++	drvid_gpio_twl4030,
++	drvid_gpiolib_debugfs,
++	drvid_mvebu_gpio,
++	drvid_mxc_gpio,
++	drvid_omap_gpio,
++	drvid_tps65910_gpio,
++	/* drivers/gpu/drm */
++	drvid_drm,
++	drvid_drm_kms_helper,
++	drvid_mipi_dsi_bus,
++	/* drivers/gpu/amd/amdgpu */
++	drvid_amdgpu,
++	/* drivers/gpu/drm/i915 */
++	drvid_i915,
++	/* drivers/gpu/drm/radeon */
++	drvid_radeon,
++	/* drivers/gpu/drm/tilcdc */
++	drvid_tilcdc,
++	/* drivers/gpu/drm/ttm */
++	drvid_ttm,
++	/* drivers/gpu/vga */
++	drvid_vga_arb,
++	/* drivers/hid */
++	drvid_uhid,
++	/* drivers/hwmon */
++	drvid_hwmon,
++	/* drivers/hwspinlock */
++	drvid_omap_hwspinlock,
++	/* drivers/i2c */
++	drvid_i2c,
++	drvid_i2c_dev,
+ 
+ 	/*
+ 	 * I2C bus drivers will be ordered according to their ID (which
+@@ -23,8 +236,85 @@ enum {
+ 	 * Therefor their IDs have to be in the following block.
+ 	 */
+ 	drvid_i2c_busses_start,
++	/* drivers/i2c/busses */
++	drvid_i2c_gpio,
++	drvid_i2c_imx,
++	drvid_i2c_mv64xxx,
++	drvid_i2c_omap,
++	drvid_tiny_usb,
+ 	drvid_i2c_busses_end,
+ 
++	/* drivers/iio/adc */
++	drvid_tiadc,
++	/* drivers/input */
++	drvid_evdev,
++	drvid_input,
++	drvid_joydev,
++	drvid_mousedev,
++	/* drivers/input/keyboard */
++	drvid_gpio_keys,
++	drvid_atkbd,
++	/* drivers/input/misc */
++	drvid_twl4030_pwrbutton,
++	drvid_uinput,
++	/* drivers/input/serio */
++	drvid_i8042,
++	drvid_serio,
++	drvid_serport,
++	drvid_serio_raw,
++	/* drivers/iommu */
++	drvid_amd_iommu_v2,
++	drvid_iommu,
++	drvid_iommu_dev,
++	drvid_ir_dev_scope,
++	drvid_omap_iommu,
++	/* drivers/leds */
++	drvid_gpio_led,
++	drvid_leds,
++	drvid_leds_regulator,
++	/* drivers/leds/trigger */
++	drvid_ledtrig_heartbeat,
++	/* drivers/mailbox */
++	drvid_omap_mbox,
++	/* drivers/md */
++	drvid_md,
++	/* drivers/media/i2c */
++	drvid_ir_kbd_i2c,
++	/* drivers/memory */
++	drvid_omap_gpmc,
++	/* drivers/mfd */
++	drvid_omap_usbtll,
++	drvid_ti_tscadc,
++	drvid_tps65217,
++	drvid_tps65910_i2c,
++	drvid_twl4030_audio,
++	drvid_twl4030_power,
++	drvid_twl_core,
++	drvid_usbhs_omap,
++	/* drivers/misc */
++	drvid_sram,
++	/* drivers/misc/eeprom */
++	drvid_at24,
++	/* drivers/mmc/card */
++	drvid_mmcblk,
++	/* drivers/mmc/core */
++	drvid_mmc,
++	/* drivers/mmc/host */
++	drvid_mxs_mmc,
++	drvid_mmc_omap,
++	drvid_omap_hsmmc,
++	drvid_sdhci,
++	drvid_sdhci_esdhc_imx,
++	/* drivers/mtd */
++	drvid_mtd,
++	drvid_ofpart,
++	/* drivers/mtd/nand */
++	drvid_omap_elm,
++	drvid_omap2_nand,
++	drvid_orion_nand,
++	/* drivers/net/bluetooth */
++	drvid_bt,
++
+ 	/*
+ 	 * Network drivers will be ordered according to the link order
+ 	 * (which means not necessarily according to their appearance
+@@ -33,8 +323,305 @@ enum {
+ 	 * Therefor their IDs have to be in the following block.
+ 	 */
+ 	drvid_network_drivers_start,
++	/* drivers/net/ethernet/ti */
++	drvid_cpsw,
++	/* drivers/net/ethernet/freescale */
++	drvid_fec,
++	/* drivers/net/ethernet/intel */
++	drvid_e1000,
++	/* drivers/net/ethernet/marvell */
++	drvid_mv643xx_eth,
++	/* drivers/net/ethernet/realtek */
++	drvid_r8169,
+ 	drvid_network_drivers_end,
+ 
++	/* drivers/net/ethernet/ti */
++	drvid_cpsw_phy_sel,
++	drvid_davinci_mdio,
++	/* drivers/net/ethernet/marvell */
++	drvid_orion_mdio,
++	/* drivers/net/irda */
++	drvid_nsc_ircc,
++	drvid_smsc_ircc,
++	/* drivers/net/phy */
++	drvid_phy_net,
++	drvid_phy_lxt,
++	drvid_phy_realtek,
++	drvid_phy_smsc,
++	/* drivers/pci */
++	drvid_pci_acpi,
++	drvid_pcibus_class,
++	drvid_pci_driver,
++	drvid_pci_proc,
++	drvid_pci_quirks,
++	drvid_pci_slot,
++	drvid_pci_stub,
++	/* drivers/pci/hotplug */
++	drvid_pci_hotplug,
++	/* drivers/phy */
++	drvid_phy,
++	drvid_phy_mvebu_sata,
++	drvid_twl4030_usb,
++	/* drivers/pinctrl */
++	drvid_imx6q_pinctrl,
++	drvid_pcs,
++	/* drivers/pinctrl/mvebu */
++	drvid_kirkwood_pinctrl,
++	/* drivers/platform/x86 */
++	drvid_acpi_wmi,
++	drvid_asus_wmi,
++	drvid_eeepc_wmi,
++	/* drivers/pnp */
++	drvid_pnp,
++	drvid_pnp_system,
++	/* drivers/pnp/pnpacpi */
++	drvid_pnpacpi,
++	/* drivers/power */
++	drvid_power_supply_class,
++	drvid_twl4030_bci,
++	/* drivers/power/reset */
++	drvid_imx_poweroff,
++	drvid_poweroff_gpio,
++	/* drivers/pwm */
++	drvid_ecap_pwm,
++	drvid_ehrpwm_pwm,
++	drvid_imx_pwm,
++	drvid_pwm_debugfs,
++	drvid_pwmss,
++	/* drivers/regulator */
++	drvid_anatop_regulator,
++	drvid_pbias_regulator,
++	drvid_regulator,
++	drvid_regulator_fixed_voltage,
++	drvid_tps_65023,
++	drvid_tps65910,
++	drvid_twlreg,
++	/* drivers/remoteproc */
++	drvid_remoteproc,
++	drvid_wkup_m3_rproc,
++	/* drivers/rtc */
++	drvid_rtc,
++	drvid_rtc_cmos,
++	drvid_rtc_mxc,
++	drvid_rtc_omap,
++	drvid_rtc_ds1307,
++	drvid_rtc_hid_sensor_time,
++	drvid_rtc_snvs,
++	drvid_rtc_twl,
++	/* drivers/scsi */
++	drvid_scsi_mod,
++	drvid_sd_mod,
++	/* drivers/spi */
++	drvid_omap2_mcspi,
++	drvid_spi_imx,
++	/* drivers/thermal */
++	drvid_thermal,
++	/* drivers/tty */
++	drvid_pty,
++	drvid_sysrq,
++	drvid_tty,
++	drvid_vtconsole,
++	/* drivers/tty/serial */
++	drvid_imx_uart,
++	drvid_lpuart,
++	drvid_of_serial,
++	drvid_omap_serial,
++	/* drivers/tty/serial/8250 */
++	drvid_omap8250,
++	drvid_serial,
++	drvid_serial_pci,
++	/* drivers/uio */
++	drvid_uio_pdrv_genirq,
++	/* drivers/usb/core */
++	drvid_usb,
++	/* drivers/usb/host */
++	drvid_ehci_hcd,
++	drvid_ehci_omap,
++	drvid_ehci_orion,
++	drvid_ehci_pci,
++	drvid_ohci_hcd,
++	drvid_ohci_omap3,
++	drvid_uhci_hcd,
++	/* drivers/usb/musb */
++	drvid_musb_dsps,
++	drvid_musb_hdrc,
++	drvid_omap2430,
++	/* drivers/usb/phy */
++	drvid_am335x_control,
++	drvid_am335x_phy,
++	drvid_gpio_vbus,
++	drvid_mxs_phy,
++	drvid_usb_phy_generic,
++	/* drivers/usb/storage */
++	drvid_ums_cypress,
++	drvid_usb_storage,
++	/* drivers/video/backlight */
++	drvid_backlight_class,
++	drvid_lcd_class,
++	drvid_platform_lcd,
++	drvid_pwm_backlight,
++	drvid_tps65217_bl,
++	/* drivers/video/console */
++	drvid_fb_console,
++	/* drivers/video/fbdev/core */
++	drvid_fbmem,
++	/* drivers/video/fbdev/omap2 */
++	drvid_omapvrfb,
++	/* drivers/watchdog */
++	drvid_imx2_wdt,
++	drvid_it87_wdt,
++	drvid_iTCO_wdt,
++	drvid_omap_wdt,
++	drvid_softdog,
++	drvid_twl4030_wdt,
++	drvid_watchdog,
++	/* fs */
++	drvid_anon_inode,
++	drvid_binfmt_misc,
++	drvid_binfmt_script,
++	drvid_binfmt_elf,
++	drvid_binfmt_elf_compat,
++	drvid_eventpoll,
++	drvid_mbcache,
++	drvid_pipe_fs,
++	drvid_proc_filesystems,
++	/* fs/btrfs */
++	drvid_btrfs,
++	/* fs/debugfs */
++	drvid_debugfs,
++	/* fs/ext4 */
++	drvid_ext4,
++	/* fs/fat */
++	drvid_msdos,
++	drvid_fat,
++	drvid_vfat,
++	/* fs/fuse */
++	drvid_fuse,
++	/* fs/jbd2 */
++	drvid_jbd2,
++	/* fs/lockd */
++	drvid_lockd,
++	/* fs/nfs */
++	drvid_grace,
++	drvid_nfs,
++	drvid_nfsv2,
++	drvid_nfsv3,
++	drvid_nfsv4,
++	drvid_nfs_layout_nfsv41_files,
++	drvid_blocklayoutdriver,
++	drvid_flexfilelayout,
++	drvid_nfs_layout_flexfiles,
++	/* fs/nfsd */
++	drvid_nfsd,
++	/* fs/proc */
++	drvid_proc_cmdline,
++	drvid_proc_consoles,
++	drvid_proc_cpuinfo,
++	drvid_proc_devices,
++	drvid_proc_interrupts,
++	drvid_proc_kcore,
++	drvid_proc_kmsg,
++	drvid_proc_loadavg,
++	drvid_proc_meminfo,
++	drvid_proc_page,
++	drvid_proc_softirqs,
++	drvid_proc_stat,
++	drvid_proc_uptime,
++	drvid_proc_version,
++	/* fs/ubifs */
++	drvid_ubifs,
++	/* ipc */
++	drvid_ipc,
++	drvid_ipc_sysctl,
++	drvid_mqueue_fs,
++	/* kernel */
++	drvid_configs,
++	drvid_proc_dma,
++	drvid_proc_modules,
++	drvid_futex,
++	drvid_load_system_certificate_list,
++	drvid_system_trusted_keyring_init,
++	drvid_wq_sysfs,
++	/* kernel/power */
++	drvid_pm,
++	drvid_pm_disk,
++	drvid_pm_sysrq,
++	drvid_snapshot_device,
++	/* kernel/sched */
++	drvid_proc_schedstat,
++	/* kernel/time */
++	drvid_clocksource_done_booting,
++	drvid_clocksource_sysfs,
++	/* lib */
++	drvid_crc_t10dif_mod,
++	drvid_crc32test,
++	drvid_kobject_uevent,
++	drvid_libcrc32c,
++	/* lib/raid6 */
++	drvid_raid6_pq,
++	/* mm */
++	drvid_bdi,
++	drvid_bdi_class,
++	drvid_proc_vmalloc,
++	drvid_procswaps,
++	/* net */
++	drvid_sock,
++	/* net/core */
++	drvid_fib_rules,
++	drvid_neigh,
++	drvid_net_dev,
++	drvid_net_inuse,
++	drvid_net_ns,
++	drvid_netpoll,
++	drvid_proto,
++	drvid_sysctl_core,
++	/* net/ethernet */
++	drvid_eth_offload,
++	/* net/ipv4 */
++	drvid_inet,
++	drvid_ipv4_netfilter,
++	drvid_ipv4_offload,
++	/* net/ipv6 */
++	drvid_inet6,
++	drvid_ipv6_offload,
++	/* net/netlink */
++	drvid_netlink,
++	drvid_netlink_proto,
++	/* net/packet */
++	drvid_packet,
++	/* net/rfkill */
++	drvid_rfkill,
++	drvid_rfkill_gpio,
++	/* net/sched */
++	drvid_pktsched,
++	/* net/sunrpc */
++	drvid_sunrpc,
++	drvid_auth_rpcgss,
++	drvid_rpcsec_gss_krb5,
++	/* net/unix */
++	drvid_af_unix,
++	/* net/wireless */
++	drvid_cfg80211,
++	drvid_wireless_nlevent,
++	/* net/xfrm */
++	drvid_xfrm_user,
++	/* security/keys */
++	drvid_key_proc,
++	/* sound/drivers/mpu401 */
++	drvid_snd_mpu401,
++	drvid_snd_mpu401_uart,
++	/* sound/soc */
++	drvid_snd_soc,
++	/* sound/soc/codecs */
++	drvid_hdmi_audio_codec,
++	drvid_twl4030_codec,
++	/* sound/soc/fsl */
++	drvid_imx_audmux,
++	/* sound/soc/omap */
++	drvid_omap_hdmi,
++	drvid_omap_mcbsp,
++	drvid_omap_twl4030,
++
+ 	drvid_max
+ };
+ 
+-- 
+2.7.4
+

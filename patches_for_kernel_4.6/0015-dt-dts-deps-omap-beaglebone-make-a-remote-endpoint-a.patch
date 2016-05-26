@@ -1,0 +1,25 @@
+From 7362e53b04a3459f1c5b6fca32c5f9aee133a1ba Mon Sep 17 00:00:00 2001
+From: Alexander Holler <holler@ahsoftware.de>
+Date: Thu, 5 Nov 2015 18:28:51 +0100
+Subject: [PATCH 15/15] dt: dts: deps: omap: beaglebone: make a remote-endpoint
+ a non-dependency
+
+---
+ arch/arm/boot/dts/am335x-boneblack.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm/boot/dts/am335x-boneblack.dts b/arch/arm/boot/dts/am335x-boneblack.dts
+index 55c0e95..9c377b7 100644
+--- a/arch/arm/boot/dts/am335x-boneblack.dts
++++ b/arch/arm/boot/dts/am335x-boneblack.dts
+@@ -71,6 +71,7 @@
+ 	port {
+ 		lcdc_0: endpoint@0 {
+ 			remote-endpoint = <&hdmi_0>;
++			no-dependencies = <&hdmi_0>;
+ 		};
+ 	};
+ };
+-- 
+2.7.4
+

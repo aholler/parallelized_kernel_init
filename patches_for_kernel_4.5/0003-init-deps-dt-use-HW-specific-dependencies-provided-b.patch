@@ -1,0 +1,187 @@
+From d98c6d613310560ee32f42b71c56fcfd84127c81 Mon Sep 17 00:00:00 2001
+From: Alexander Holler <holler@ahsoftware.de>
+Date: Tue, 6 Oct 2015 18:33:19 +0200
+Subject: [PATCH 03/15] init: deps: dt: use (HW-specific) dependencies provided
+ by the DT too
+
+This patch adds dependencies provided by the hardware description in
+the used DT. This avoids the use of the deferred probe mechanism
+on most (if not all) DT based kernels.
+
+Drawback is that the binary DT blob has to be enhanced with type
+information for phandles (which are used as dependencies) which
+needs a modified dtc.
+
+Signed-off-by: Alexander Holler <holler@ahsoftware.de>
+---
+ drivers/of/base.c   | 114 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ include/linux/of.h  |   3 ++
+ init/dependencies.c |   4 ++
+ 3 files changed, 121 insertions(+)
+
+diff --git a/drivers/of/base.c b/drivers/of/base.c
+index 017dd94..a84b610 100644
+--- a/drivers/of/base.c
++++ b/drivers/of/base.c
+@@ -12,6 +12,8 @@
+  *  Reconsolidated from arch/x/kernel/prom.c by Stephen Rothwell and
+  *  Grant Likely.
+  *
++ *  The dependency related stuff was done by Alexander Holler.
++ *
+  *      This program is free software; you can redistribute it and/or
+  *      modify it under the terms of the GNU General Public License
+  *      as published by the Free Software Foundation; either version
+@@ -2305,3 +2307,115 @@ struct device_node *of_graph_get_remote_port(const struct device_node *node)
+ 	return of_get_next_parent(np);
+ }
+ EXPORT_SYMBOL(of_graph_get_remote_port);
++
++#ifdef CONFIG_DEPENDENCIES
++
++static const struct _annotated_initcall * __init find_matching_driver(
++	const struct _annotated_initcall *from, const struct device_node *node)
++{
++	while (++from != __annotated_initcall_end)
++		if (from->driver &&
++				__of_match_node(from->driver->of_match_table,
++					node))
++			return from;
++	return NULL;
++}
++
++static int __init add_dep_list(const struct device_node *node, unsigned drvid)
++{
++	const __be32 *list, *list_end;
++	uint32_t ph;
++	int size = 0;
++	int rc = 0;
++	const struct device_node *dep;
++	const struct _annotated_initcall *ac;
++
++	list = __of_get_property(node, "dependencies", &size);
++	if (!list || !size || size % sizeof(*list))
++		return 0;
++	list_end = list + size / sizeof(*list);
++	while (list < list_end) {
++		ph = be32_to_cpup(list++);
++		if (unlikely(!ph)) {
++			/* Should never happen */
++			if (node->name)
++				pr_warn("phandle == 0 for %s\n", node->name);
++			continue;
++		}
++		dep = of_find_node_by_phandle(ph);
++		if (unlikely(!dep)) {
++			pr_err("No DT node for dependency with phandle 0x%x found\n",
++				ph);
++			continue;
++		}
++		ac = __annotated_initcall_start - 1;
++		while ((ac = find_matching_driver(ac, dep))) {
++			if (!ac->id)
++				continue;
++			rc = add_initcall_dependency(drvid, ac->id);
++			if (rc)
++				return rc;
++		}
++	}
++
++	return rc;
++}
++
++static int __init add_deps(unsigned parent, const struct device_node *node)
++{
++	struct device_node *child;
++	const struct _annotated_initcall *ac;
++	int rc = 0;
++	bool found_one_driver = false;
++
++	if (!__of_device_is_available(node))
++		return 0;
++	if (__of_get_property(node, "compatible", NULL)) {
++		ac = __annotated_initcall_start - 1;
++		while ((ac = find_matching_driver(ac, node))) {
++			if (!ac->id)
++				continue;
++			found_one_driver = true;
++			rc = add_initcall_dependency(ac->id, parent);
++			if (unlikely(rc))
++				return rc;
++			rc = add_dep_list(node, ac->id);
++			if (unlikely(rc))
++				return rc;
++			for_each_child_of_node(node, child) {
++				rc = add_deps(ac->id, child);
++				if (unlikely(rc))
++					return rc;
++			}
++		}
++		if (found_one_driver)
++			return rc;
++	}
++	for_each_child_of_node(node, child) {
++		rc = add_deps(parent, child);
++		if (unlikely(rc))
++			break;
++	}
++
++	return rc;
++}
++
++int __init of_add_dependencies(void)
++{
++	int rc = 0;
++	struct device_node *child;
++	struct device_node *root =  of_find_node_by_path("/");
++
++	if (unlikely(!root))
++		return -EINVAL;
++
++	for_each_child_of_node(root, child) {
++		rc = add_deps(0, child);
++		if (unlikely(rc))
++			break;
++	}
++	of_node_put(root);
++
++	return rc;
++}
++#endif /* CONFIG_DEPENDENCIES */
+diff --git a/include/linux/of.h b/include/linux/of.h
+index dc6e396..b249edd 100644
+--- a/include/linux/of.h
++++ b/include/linux/of.h
+@@ -1102,4 +1102,7 @@ static inline int of_overlay_destroy_all(void)
+ 
+ #endif
+ 
++/* Inserts dependencies for drivers referenced in the loaded DT. */
++int __init of_add_dependencies(void);
++
+ #endif /* _LINUX_OF_H */
+diff --git a/init/dependencies.c b/init/dependencies.c
+index c47817c..b484f67 100644
+--- a/init/dependencies.c
++++ b/init/dependencies.c
+@@ -17,6 +17,7 @@
+ #include <linux/device.h>
+ #include <linux/mod_devicetable.h>
+ #include <linux/init.h>
++#include <linux/of.h>
+ 
+ #if defined(CONFIG_DEPENDENCIES_PRINT_INIT_ORDER) \
+ 	|| defined(CONFIG_DEPENDENCIES_PRINT_CALLS)
+@@ -335,6 +336,9 @@ static int __init build_order(void)
+ 
+ 	build_inventory();
+ 	add_dependencies();
++#ifdef CONFIG_OF
++	of_add_dependencies();
++#endif
+ 	if (topological_sort())
+ 		return -EINVAL; /* cycle found */
+ 	pr_debug("init: vertices: %u edges %u count %u\n",
+-- 
+2.7.4
+

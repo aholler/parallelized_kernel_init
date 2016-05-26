@@ -1,0 +1,35 @@
+From b0da2756a93d83e8bf6335a71a759b492d0172bf Mon Sep 17 00:00:00 2001
+From: Alexander Holler <holler@ahsoftware.de>
+Date: Sat, 3 May 2014 13:14:45 +0200
+Subject: [PATCH 12/15] dt: dts: deps: kirkwood: dockstar: add dependency ehci
+ -> usb power regulator
+
+This serves as an example how easy it is to fix an initialization order
+if the order depends on the DT. No source code changes will be necessary.
+
+If you look at the dependency graph for the dockstar, you will see that
+there is no dependency between ehci and the usb power regulator. This
+ends up with the fact that the regulator will be initialized after ehci.
+
+Fix this by adding one dependency to the .dts.
+
+Signed-off-by: Alexander Holler <holler@ahsoftware.de>
+---
+ arch/arm/boot/dts/kirkwood-dockstar.dts | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm/boot/dts/kirkwood-dockstar.dts b/arch/arm/boot/dts/kirkwood-dockstar.dts
+index 8497363..426d8840 100644
+--- a/arch/arm/boot/dts/kirkwood-dockstar.dts
++++ b/arch/arm/boot/dts/kirkwood-dockstar.dts
+@@ -107,3 +107,7 @@
+ 		phy-handle = <&ethphy0>;
+ 	};
+ };
++
++&usb0 {
++	dependencies = <&usb_power>;
++};
+-- 
+2.7.4
+

@@ -1,0 +1,68 @@
+From 22d53a7c4105a44dbb183ce2741ae583c8703451 Mon Sep 17 00:00:00 2001
+From: Alexander Holler <holler@ahsoftware.de>
+Date: Sun, 23 Aug 2015 01:00:52 +0200
+Subject: [PATCH 13/15] dt: dts: deps: imx6q: make some remote-endpoints
+ non-dependencies
+
+This is necessary to remove dependency cycles introduced by
+'remote-endpoints'.
+
+Signed-off-by: Alexander Holler <holler@ahsoftware.de>
+---
+ arch/arm/boot/dts/imx6q.dtsi   | 2 ++
+ arch/arm/boot/dts/imx6qdl.dtsi | 4 ++++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/arch/arm/boot/dts/imx6q.dtsi b/arch/arm/boot/dts/imx6q.dtsi
+index 0d93c0e..b65eb52 100644
+--- a/arch/arm/boot/dts/imx6q.dtsi
++++ b/arch/arm/boot/dts/imx6q.dtsi
+@@ -159,6 +159,7 @@
+ 
+ 				ipu2_di0_hdmi: endpoint@1 {
+ 					remote-endpoint = <&hdmi_mux_2>;
++					no-dependencies = <&hdmi_mux_2>;
+ 				};
+ 
+ 				ipu2_di0_mipi: endpoint@2 {
+@@ -180,6 +181,7 @@
+ 
+ 				ipu2_di1_hdmi: endpoint@1 {
+ 					remote-endpoint = <&hdmi_mux_3>;
++					no-dependencies = <&hdmi_mux_3>;
+ 				};
+ 
+ 				ipu2_di1_mipi: endpoint@2 {
+diff --git a/arch/arm/boot/dts/imx6qdl.dtsi b/arch/arm/boot/dts/imx6qdl.dtsi
+index f74d3db..6585b98 100644
+--- a/arch/arm/boot/dts/imx6qdl.dtsi
++++ b/arch/arm/boot/dts/imx6qdl.dtsi
+@@ -1235,10 +1235,12 @@
+ 
+ 				ipu1_di0_hdmi: endpoint@1 {
+ 					remote-endpoint = <&hdmi_mux_0>;
++					no-dependencies = <&hdmi_mux_0>;
+ 				};
+ 
+ 				ipu1_di0_mipi: endpoint@2 {
+ 					remote-endpoint = <&mipi_mux_0>;
++					no-dependencies = <&mipi_mux_0>;
+ 				};
+ 
+ 				ipu1_di0_lvds0: endpoint@3 {
+@@ -1260,10 +1262,12 @@
+ 
+ 				ipu1_di1_hdmi: endpoint@1 {
+ 					remote-endpoint = <&hdmi_mux_1>;
++					no-dependencies = <&hdmi_mux_1>;
+ 				};
+ 
+ 				ipu1_di1_mipi: endpoint@2 {
+ 					remote-endpoint = <&mipi_mux_1>;
++					no-dependencies = <&mipi_mux_1>;
+ 				};
+ 
+ 				ipu1_di1_lvds0: endpoint@3 {
+-- 
+2.7.4
+

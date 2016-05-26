@@ -28,7 +28,14 @@ and
 
 Alexander Holler, November 2015
 
+Update May 2016:
 
+I'm using these patches now on Intel and AMD systems as well on ARM
+system.
+Of course, I still only have added dependencies for drivers I'm
+using with my hand-made kernel configs. That means, depending on your
+kernel configuration, some necessary dependencies between statically
+linked drivers might still be missing.
 
 ------------------------- introductory mail -------------------------
 Hello,

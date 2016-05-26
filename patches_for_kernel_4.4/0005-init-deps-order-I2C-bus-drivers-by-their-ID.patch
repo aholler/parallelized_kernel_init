@@ -1,0 +1,88 @@
+From 94d0644dd60ac6e609f81066cf45812416a5dabd Mon Sep 17 00:00:00 2001
+From: Alexander Holler <holler@ahsoftware.de>
+Date: Wed, 14 Oct 2015 19:55:07 +0200
+Subject: [PATCH 05/15] init: deps: order I2C bus drivers by their ID
+
+In order to provide a stable I2C bus numbering, we order I2C bus drivers
+according to their driver ID.
+
+If that is better or worse than ordering by link order might have to be
+discussed, but for now, it's good to provide an example about how to order
+something based on driver IDs.
+
+Signed-off-by: Alexander Holler <holler@ahsoftware.de>
+---
+ include/linux/driver_ids.h |  9 +++++++++
+ init/dependencies.c        | 25 +++++++++++++++++++++++++
+ 2 files changed, 34 insertions(+)
+
+diff --git a/include/linux/driver_ids.h b/include/linux/driver_ids.h
+index 1133a68..330080e 100644
+--- a/include/linux/driver_ids.h
++++ b/include/linux/driver_ids.h
+@@ -17,6 +17,15 @@ enum {
+ 	/* To be filled */
+ 
+ 	/*
++	 * I2C bus drivers will be ordered according to their ID (which
++	 * means according to their appearance here).
++	 * This provides stable I2C bus numbers.
++	 * Therefor their IDs have to be in the following block.
++	 */
++	drvid_i2c_busses_start,
++	drvid_i2c_busses_end,
++
++	/*
+ 	 * Network drivers will be ordered according to the link order
+ 	 * (which means not necessarily according to their appearance
+ 	 * here).
+diff --git a/init/dependencies.c b/init/dependencies.c
+index 027fc4b..d20d6fc 100644
+--- a/init/dependencies.c
++++ b/init/dependencies.c
+@@ -298,10 +298,22 @@ static int __init add_dependencies(void)
+ 	return 0;
+ }
+ 
++static int __init compare_unsigned(const void *lhs, const void *rhs)
++{
++	if (*(unsigned *)lhs < *(unsigned *)rhs)
++		return -1;
++	if (*(unsigned *)lhs > *(unsigned *)rhs)
++		return 1;
++	return 0;
++}
++
+ static void __init build_inventory(void)
+ {
+ 	const struct _annotated_initcall *ac;
+ 	unsigned id_last_network_driver = 0;
++	unsigned id_i2c_bus_driver[drvid_i2c_busses_end
++				   - drvid_i2c_busses_start];
++	unsigned count_i2c_bus_drivers = 0;
+ 
+ 	ac = __annotated_initcall_start;
+ 	for (; ac < __annotated_initcall_end; ++ac) {
+@@ -316,6 +328,19 @@ static void __init build_inventory(void)
+ 					id_last_network_driver);
+ 			id_last_network_driver = ac->id;
+ 		}
++		/* order I2C bus drivers by their ID */
++		if (ac->id > drvid_i2c_busses_start &&
++				ac->id < drvid_i2c_busses_end)
++			id_i2c_bus_driver[count_i2c_bus_drivers++] = ac->id;
++	}
++	if (count_i2c_bus_drivers > 1) {
++		unsigned i;
++
++		sort(id_i2c_bus_driver, count_i2c_bus_drivers,
++				sizeof(unsigned), &compare_unsigned, NULL);
++		for (i = 1; i < count_i2c_bus_drivers; ++i)
++			add_initcall_dependency(id_i2c_bus_driver[i],
++				id_i2c_bus_driver[i-1]);
+ 	}
+ }
+ 
+-- 
+2.7.4
+

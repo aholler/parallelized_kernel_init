@@ -1,0 +1,78 @@
+From 180be450444b7dc0b30c93ce20ef4dbfbce7c5f7 Mon Sep 17 00:00:00 2001
+From: Alexander Holler <holler@ahsoftware.de>
+Date: Sun, 23 Aug 2015 01:00:52 +0200
+Subject: [PATCH 13/15] dt: dts: deps: imx6q: make some remote-endpoints
+ non-dependencies
+
+This is necessary to remove dependency cycles introduced by
+'remote-endpoints'.
+
+Signed-off-by: Alexander Holler <holler@ahsoftware.de>
+---
+ arch/arm/boot/dts/imx6q.dtsi   | 4 ++++
+ arch/arm/boot/dts/imx6qdl.dtsi | 4 ++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/arch/arm/boot/dts/imx6q.dtsi b/arch/arm/boot/dts/imx6q.dtsi
+index c30c836..2027627 100644
+--- a/arch/arm/boot/dts/imx6q.dtsi
++++ b/arch/arm/boot/dts/imx6q.dtsi
+@@ -159,10 +159,12 @@
+ 
+ 				ipu2_di0_hdmi: hdmi-endpoint {
+ 					remote-endpoint = <&hdmi_mux_2>;
++					no-dependencies = <&hdmi_mux_2>;
+ 				};
+ 
+ 				ipu2_di0_mipi: mipi-endpoint {
+ 					remote-endpoint = <&mipi_mux_2>;
++					no-dependencies = <&mipi_mux_2>;
+ 				};
+ 
+ 				ipu2_di0_lvds0: lvds0-endpoint {
+@@ -181,10 +183,12 @@
+ 
+ 				ipu2_di1_hdmi: hdmi-endpoint {
+ 					remote-endpoint = <&hdmi_mux_3>;
++					no-dependencies = <&hdmi_mux_3>;
+ 				};
+ 
+ 				ipu2_di1_mipi: mipi-endpoint {
+ 					remote-endpoint = <&mipi_mux_3>;
++					no-dependencies = <&mipi_mux_3>;
+ 				};
+ 
+ 				ipu2_di1_lvds0: lvds0-endpoint {
+diff --git a/arch/arm/boot/dts/imx6qdl.dtsi b/arch/arm/boot/dts/imx6qdl.dtsi
+index b13b0b2..ab9b5dc 100644
+--- a/arch/arm/boot/dts/imx6qdl.dtsi
++++ b/arch/arm/boot/dts/imx6qdl.dtsi
+@@ -1237,10 +1237,12 @@
+ 
+ 				ipu1_di0_hdmi: hdmi-endpoint {
+ 					remote-endpoint = <&hdmi_mux_0>;
++					no-dependencies = <&hdmi_mux_0>;
+ 				};
+ 
+ 				ipu1_di0_mipi: mipi-endpoint {
+ 					remote-endpoint = <&mipi_mux_0>;
++					no-dependencies = <&mipi_mux_0>;
+ 				};
+ 
+ 				ipu1_di0_lvds0: lvds0-endpoint {
+@@ -1262,10 +1264,12 @@
+ 
+ 				ipu1_di1_hdmi: hdmi-endpoint {
+ 					remote-endpoint = <&hdmi_mux_1>;
++					no-dependencies = <&hdmi_mux_1>;
+ 				};
+ 
+ 				ipu1_di1_mipi: mipi-endpoint {
+ 					remote-endpoint = <&mipi_mux_1>;
++					no-dependencies = <&mipi_mux_1>;
+ 				};
+ 
+ 				ipu1_di1_lvds0: lvds0-endpoint {
+-- 
+2.5.5
+
